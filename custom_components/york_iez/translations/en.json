@@ -1,0 +1,69 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "York IEZ login",
+        "description": "Enter the phone number and password of your York Smart Home app account.",
+        "data": {
+          "phone": "Phone",
+          "password": "Password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate York IEZ",
+        "description": "Login for {phone} has expired. Enter the password again.",
+        "data": {
+          "phone": "Phone",
+          "password": "Password"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid account or password.",
+      "cannot_connect": "Cannot reach the York cloud, try again later.",
+      "unknown": "Unknown error, check the logs."
+    },
+    "abort": {
+      "already_configured": "This home is already configured.",
+      "reauth_successful": "Reauthentication successful.",
+      "reauth_failed": "Config entry to reauthenticate was not found."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "York IEZ options",
+        "description": "Status polling interval. Shorter is more responsive but sends more requests.",
+        "data": {
+          "scan_interval": "Polling interval"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "online": {
+        "name": "Online"
+      },
+      "alarm": {
+        "name": "Alarm summary"
+      },
+      "ou_model": {
+        "name": "Outdoor unit model"
+      },
+      "indoor_temp": {
+        "name": "Indoor temperature"
+      }
+    },
+    "binary_sensor": {
+      "fault": {
+        "name": "Fault"
+      }
+    },
+    "switch": {
+      "floor_heat": {
+        "name": "Floor heating"
+      }
+    }
+  }
+}

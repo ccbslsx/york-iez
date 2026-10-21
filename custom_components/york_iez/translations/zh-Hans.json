@@ -1,0 +1,69 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "约克 IEZ 登录",
+        "description": "输入约克智慧家 App 的账号（手机号）和密码。",
+        "data": {
+          "phone": "手机号",
+          "password": "密码"
+        }
+      },
+      "reauth_confirm": {
+        "title": "重新认证约克 IEZ",
+        "description": "账号 {phone} 的登录已失效，请重新输入密码。",
+        "data": {
+          "phone": "手机号",
+          "password": "密码"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "账号或密码错误。",
+      "cannot_connect": "无法连接到约克云，请稍后重试。",
+      "unknown": "未知错误，请查看日志。"
+    },
+    "abort": {
+      "already_configured": "该家庭已配置。",
+      "reauth_successful": "重新认证成功。",
+      "reauth_failed": "找不到要重新认证的条目。"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "约克 IEZ 选项",
+        "description": "状态轮询间隔。间隔越短越实时，但对约克云的请求也越多。",
+        "data": {
+          "scan_interval": "轮询间隔"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "online": {
+        "name": "在线"
+      },
+      "alarm": {
+        "name": "故障汇总"
+      },
+      "ou_model": {
+        "name": "外机型号"
+      },
+      "indoor_temp": {
+        "name": "室内温度"
+      }
+    },
+    "binary_sensor": {
+      "fault": {
+        "name": "故障"
+      }
+    },
+    "switch": {
+      "floor_heat": {
+        "name": "地暖"
+      }
+    }
+  }
+}
