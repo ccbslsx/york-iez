@@ -2,8 +2,8 @@
 
 实体归属：::
 
-    机组设备（IEZ 网关/外机）: 在线、故障汇总、外机型号
-    每台内机设备            : 室内温度
+    机组设备（IEZ 网关 / 外机）: 在线、故障汇总、外机型号、安装信息
+    每台内机设备            : 室内温度、额定容量
 
 以往这些实体散在顶层，没有设备归属；现在每个都带 ``device_info``，
 在 HA 里按「1 个机组 + 6 台内机」的结构呈现。
@@ -29,7 +29,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import IuStatus
 from .const import DOMAIN
 from .coordinator import YorkIezCoordinator
-from .entity import clean_text, gateway_device_info, indoor_device_info
+from .entity import gateway_device_info, indoor_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,11 +49,13 @@ async def async_setup_entry(
         YorkIezOnlineSensor(coordinator, iez_code),
         YorkIezAlarmSensor(coordinator, iez_code),
         YorkIezOUModelSensor(coordinator, iez_code),
+        YorkIezInstallInfoSensor(coordinator, iez_code),
     ]
     for iu_id in iu_ids:
         entities.append(
             YorkIezIndoorTempSensor(coordinator, iu_id, gw_id)
         )
+        entities.append(YorkIezCapacitySensor(coordinator, iu_id, gw_id))
     async_add_entities(entities)
 
 
@@ -154,7 +156,6 @@ class YorkIezAlarmSensor(_YorkIezBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        attrs: dict[str, Any] = {"故障内机数": 0}
         codes: dict[str, str] = {}
         for st in self.coordinator.statuses.values():
             if st.alarm and st.alarm != "00":
@@ -162,10 +163,7 @@ class YorkIezAlarmSensor(_YorkIezBaseSensor):
                     "iuName"
                 ) or f"内机{st.iu_no}"
                 codes[name] = st.alarm
-        attrs["故障内机数"] = len(codes)
-        if codes:
-            attrs["故障清单"] = codes
-        return attrs
+        return {"故障内机数": len(codes), "故障清单": codes or {}}
 
 
 class YorkIezOUModelSensor(_YorkIezBaseSensor):
@@ -187,7 +185,7 @@ class YorkIezOUModelSensor(_YorkIezBaseSensor):
     def native_value(self) -> str:
         ous = (self.coordinator.system_meta or {}).get("ouList") or []
         ou = ous[0] if ous else {}
-        return clean_text(ou.get("ouType")) or "未知"
+        return str(ou.get("ouType") or "").strip() or "未知"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -200,15 +198,70 @@ class YorkIezOUModelSensor(_YorkIezBaseSensor):
             ("系统号", "systemNo"),
             ("额定容量", "capacity"),
             ("外机类型码", "ou23Type"),
+            ("电量计量", "elecFlg"),
         ):
             if ou.get(key) not in (None, ""):
                 attrs[label] = ou.get(key)
-        if clean_text(meta.get("version")):
-            attrs["固件版本"] = clean_text(meta.get("version"))
-        if clean_text(meta.get("versionModbus")):
-            attrs["Modbus 版本"] = clean_text(meta.get("versionModbus"))
+        if meta.get("version"):
+            attrs["固件版本"] = meta.get("version")
+        if meta.get("versionModbus"):
+            attrs["Modbus 版本"] = meta.get("versionModbus")
+        if meta.get("versionModbusProtocol") is not None:
+            attrs["Modbus 协议号"] = meta.get("versionModbusProtocol")
         if meta.get("capacityRates"):
             attrs["容量率"] = meta.get("capacityRates")
+        if meta.get("period") is not None:
+            attrs["上报周期秒"] = meta.get("period")
+        return attrs
+
+
+class YorkIezInstallInfoSensor(_YorkIezBaseSensor):
+    """装机与位置信息（diagnostic，含隐私，默认折叠）。"""
+
+    _attr_name = "装机信息"
+    _attr_icon = "mdi:wrench-clock"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: YorkIezCoordinator, iez_code: str) -> None:
+        super().__init__(
+            coordinator,
+            "install_info",
+            gateway_device_info(coordinator),
+            f"york_iez_{iez_code}",
+        )
+
+    @staticmethod
+    def _ts(v: Any) -> str | None:
+        if isinstance(v, (int, float)) and v > 10**11:
+            return time.strftime("%Y-%m-%d", time.localtime(v / 1000))
+        return None
+
+    @property
+    def native_value(self) -> str:
+        meta = self.coordinator.system_meta or {}
+        bind = self._ts(meta.get("bindTime"))
+        return f"绑定于 {bind}" if bind else "未知"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        meta = self.coordinator.system_meta or {}
+        attrs: dict[str, Any] = {}
+        for label, key in (
+            ("省份市区", "position1"),
+            ("小区", "position2"),
+            ("区域代码", "regionCode"),
+            ("品牌代码", "brand"),
+        ):
+            if meta.get(key) not in (None, ""):
+                attrs[label] = meta.get(key)
+        if self._ts(meta.get("bindTime")):
+            attrs["绑定时间"] = self._ts(meta.get("bindTime"))
+        if self._ts(meta.get("heartTime")):
+            attrs["最后心跳"] = self._ts(meta.get("heartTime"))
+        if meta.get("otaFlg") is not None:
+            attrs["固件可升级"] = str(meta.get("otaFlg")) == "1"
+        if meta.get("autoOta") is not None:
+            attrs["自动升级"] = str(meta.get("autoOta")) == "1"
         return attrs
 
 
@@ -264,7 +317,6 @@ class YorkIezIndoorTempSensor(_YorkIezBaseSensor):
             return {}
         attrs: dict[str, Any] = {
             "数据来源": "回风温度 iu39Ti",
-            "原始字段": "iu39Ti",
         }
         if st.t_out is not None:
             attrs["出风温度"] = st.t_out
@@ -276,4 +328,66 @@ class YorkIezIndoorTempSensor(_YorkIezBaseSensor):
             attrs["上报时间"] = time.strftime(
                 "%Y-%m-%d %H:%M:%S", time.localtime(st.round_time / 1000)
             )
+        return attrs
+
+
+class YorkIezCapacitySensor(_YorkIezBaseSensor):
+    """内机额定容量（制冷量，kW）。
+
+    来自约克云 ``homeDetail.deviceList[].iuList[].capacity``。
+    恒为静态值，不随运行变化，仅用于判断各内机大小/配型。
+    """
+
+    _attr_name = "额定容量"
+    _attr_icon = "mdi:air-conditioner"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_native_unit_of_measurement = "kW"
+    _attr_suggested_display_precision = 2
+
+    def __init__(
+        self,
+        coordinator: YorkIezCoordinator,
+        iu_id: str,
+        gateway_device_id: str | None = None,
+    ) -> None:
+        super().__init__(
+            coordinator,
+            "capacity",
+            indoor_device_info(coordinator, iu_id, gateway_device_id),
+            f"york_iez_{coordinator.iez_code}_{iu_id}",
+        )
+        self._iu_id = iu_id
+
+    @property
+    def _meta(self) -> dict[str, Any]:
+        return self.coordinator.iu_meta.get(self._iu_id) or {}
+
+    @property
+    def native_value(self) -> float | None:
+        cap = self._meta.get("capacity")
+        try:
+            return None if cap is None else float(cap)
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        meta = self._meta
+        attrs: dict[str, Any] = {}
+        if meta.get("iuNo"):
+            attrs["内机编号"] = meta.get("iuNo")
+        if meta.get("iuType"):
+            attrs["内机类型码"] = meta.get("iuType")
+        for label, key in (
+            ("制冷下限", "coldMin"),
+            ("制冷上限", "coldMax"),
+            ("制热下限", "heatMin"),
+            ("制热上限", "heatMax"),
+        ):
+            if meta.get(key) is not None:
+                attrs[label] = meta.get(key)
+        if meta.get("heatFlg"):
+            attrs["支持地暖"] = str(meta.get("heatFlg")) == "1"
+        if meta.get("halfSupport"):
+            attrs["支持半度温控"] = str(meta.get("halfSupport")) == "1"
         return attrs

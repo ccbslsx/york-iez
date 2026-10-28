@@ -49,17 +49,32 @@ def _first_ou(system_meta: dict[str, Any]) -> dict[str, Any]:
     return ous[0] if ous else {}
 
 
+def _kw(value: Any) -> str:
+    """把 6.0 / "0.8" 这类容量值规格化成 ``6.0kW`` 文本，拿不到返回空串。"""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if num <= 0:
+        return ""
+    return f"{num:g}kW"
+
+
 def gateway_device_info(coordinator: YorkIezCoordinator) -> DeviceInfo:
     """机组（IEZ 网关 / 外机）设备。"""
     meta = coordinator.system_meta or {}
     ou = _first_ou(meta)
     iez = coordinator.iez_code
     name = str(meta.get("iezName") or "").strip() or f"约克空调机组 {iez[-4:]}"
+    model = clean_text(ou.get("ouType")) or "IEZ 多联机机组"
+    kw = _kw(ou.get("capacity"))
+    if kw:
+        model = f"{model} · {kw}"
     return DeviceInfo(
         identifiers={(DOMAIN, iez)},
         name=name,
         manufacturer=MANUFACTURER,
-        model=clean_text(ou.get("ouType")) or "IEZ 多联机机组",
+        model=model,
         sw_version=clean_text(meta.get("version")) or None,
         serial_number=iez,
     )
@@ -90,6 +105,13 @@ async def async_ensure_gateway_device(
     return device.id
 
 
+def _indoor_model(meta: dict[str, Any]) -> str:
+    """内机设备型号：产品名 + 额定容量（kW），如「约克聚好看多联机 · 0.8kW」。"""
+    model = clean_text(meta.get("productName")) or "约克聚好看多联机"
+    kw = _kw(meta.get("capacity"))
+    return f"{model} · {kw}" if kw else model
+
+
 def indoor_device_info(
     coordinator: YorkIezCoordinator,
     iu_id: str,
@@ -105,7 +127,7 @@ def indoor_device_info(
         identifiers={(DOMAIN, iu_id)},
         name=name,
         manufacturer=MANUFACTURER,
-        model=clean_text(meta.get("productName")) or "约克聚好看多联机",
+        model=_indoor_model(meta),
         serial_number=iu_id,
     )
     if gateway_device_id:

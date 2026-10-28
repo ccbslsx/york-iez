@@ -30,6 +30,8 @@ from .const import (
     DEFAULT_OS,
     IEZ_DEVICE_TYPE,
     LOGIN_PATH,
+    PATH_SMART_DETAIL,
+    PATH_SMARTS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -337,6 +339,75 @@ class YorkIezApi:
         )
         return (envelope.get("data") or {}).get("smartList") or []
 
+    async def get_smart_detail(self, home_id: int, smart_id: Any) -> dict[str, Any]:
+        """单条场景/定时明细（含 iuList[].ctrlJson 具体指令）。"""
+        envelope = await self._authed(
+            "GET",
+            PATH_SMART_DETAIL.format(home_id=home_id, smart_id=smart_id),
+        )
+        data = envelope.get("data")
+        return data if isinstance(data, dict) else {}
+
+    async def get_replayable_scenes(
+        self, home_id: int, iu_meta: dict[str, dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """把云端「有具体内机指令」的场景/定时整理成可本地重放的记录。
+
+        约克 App 没有「执行场景」接口 —— 它是把场景里存好的 iuList[].ctrlJson
+        通过 ``multiIuOuCtrl`` 重放一遍（见 york_smart_home 的 run_scene）。
+        所以这里只挑出带 ctrlJson 的条目；纯云端推荐场景（离家/回家/睡眠等
+        type 1/2/5/6/7）没有内机指令，无法本地重放，直接跳过。
+
+        返回项::
+
+            {"smart_id": 116879, "name": "早上地暖16度", "is_timer": True,
+             "commands": [{"iu_id": "...", "iu_no": "05", "iu_type": "05",
+                           "system_no": "00", "iu_sn": "...",
+                           "ctrl_json": {"onoff": 1, "temp": 16, "mode": 16}}]}
+        """
+        out: list[dict[str, Any]] = []
+        meta = iu_meta or {}
+        # 实测：场景**列表**接口本身就把 iuList[].ctrlJson 全带回来了，
+        # 不需要逐条补 /smarts/{id} 明细请求（那会变成 14 次/轮）。
+        for rec in await self.get_smarts(home_id):
+            smart_id = rec.get("smartId") or rec.get("id")
+            if smart_id is None:
+                continue
+            iu_list = rec.get("iuList") or []
+            cmds: list[dict[str, Any]] = []
+            for iu in iu_list:
+                ctrl_json = iu.get("ctrlJson")
+                iu_id = str(iu.get("iuId") or "")
+                if not isinstance(ctrl_json, dict) or not ctrl_json or not iu_id:
+                    continue
+                known = meta.get(iu_id) or {}
+                cmds.append(
+                    {
+                        "iu_id": iu_id,
+                        "iu_no": str(iu.get("iuNo") or known.get("iuNo") or ""),
+                        "iu_type": str(
+                            iu.get("iuType") or known.get("iuType") or "05"
+                        ),
+                        "system_no": str(
+                            iu.get("systemNo") or known.get("systemNo") or "00"
+                        ),
+                        "iu_sn": str(iu.get("iuSn") or known.get("iuSn") or ""),
+                        "ctrl_json": dict(ctrl_json),
+                    }
+                )
+            if not cmds:
+                continue
+            out.append(
+                {
+                    "smart_id": smart_id,
+                    "name": str(rec.get("smartName") or f"场景 {smart_id}").strip(),
+                    "scene_type": rec.get("type"),
+                    "is_timer": bool(rec.get("timeRule") or rec.get("timeRuleOn")),
+                    "commands": cmds,
+                }
+            )
+        return out
+
     async def get_home_detail(self, home_id: int) -> dict[str, Any]:
         """家庭详情，含 deviceList[].iuList（内机名称/功率/温度范围）。"""
         envelope = await self._authed("GET", f"/api/apphome/homes/{home_id}")
@@ -400,6 +471,8 @@ class YorkIezApi:
                 "halfSupport": str(iu.get("halfSupport") or ""),
                 "humiMode": str(iu.get("humiMode") or ""),
                 "lifeWaterHeat": str(iu.get("lifeWaterHeat") or ""),
+                "productCode": str(iu.get("productCode") or ""),
+                "heatMode": str(iu.get("heatMode") or ""),
             }
         return out
 
@@ -443,6 +516,51 @@ class YorkIezApi:
                 "ctrlList": [
                     {
                         "iuCtrlInfo": [info],
+                        "ouCtrlInfo": [],
+                        "iezCode": iez_code,
+                        "deviceType": IEZ_DEVICE_TYPE,
+                    }
+                ],
+                "xkqCtrlList": [],
+            },
+        )
+
+    async def control_ius(
+        self,
+        home_id: int,
+        iez_code: str,
+        items: list[tuple[dict[str, Any], dict[str, Any]]],
+    ) -> None:
+        """一次请求控制多台内机（场景重放用）。
+
+        ``items`` = [(内机元数据, ctrlJson), ...]。约克 App 重放场景时就是一个
+        ``ctrlList[0].iuCtrlInfo`` 里塞多条指令，这里照抄，比逐台发省请求、
+        也不会出现「只执行了一半」。
+        """
+        infos: list[dict[str, Any]] = []
+        for meta, ctrl_json in items:
+            info: dict[str, Any] = {
+                "systemNo": str(meta.get("systemNo", "00")),
+                "iuNo": str(meta.get("iuNo", "")),
+                "iuType": str(meta.get("iuType", "05")),
+                "ctrlJson": ctrl_json,
+            }
+            iu_sn = meta.get("iuSn")
+            if iu_sn:
+                info["iuSn"] = str(iu_sn)
+            infos.append(info)
+        if not infos:
+            return
+
+        await self._authed(
+            "POST",
+            "/api/appcontrol/cmds/multiIuOuCtrl",
+            json_body={
+                "homeId": home_id,
+                "ctrlType": CTRL_TYPE_SINGLE,
+                "ctrlList": [
+                    {
+                        "iuCtrlInfo": infos,
                         "ouCtrlInfo": [],
                         "iezCode": iez_code,
                         "deviceType": IEZ_DEVICE_TYPE,

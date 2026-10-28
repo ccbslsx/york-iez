@@ -90,6 +90,18 @@ async def async_get_config_entry_diagnostics(
                 "round_time": st.round_time,
             }
 
+    scenes: list[dict[str, Any]] = []
+    if coordinator is not None:
+        for rec in coordinator.scenes or []:
+            scenes.append(
+                {
+                    "smart_id": rec.get("smart_id"),
+                    "name": rec.get("name"),
+                    "is_timer": rec.get("is_timer"),
+                    "commands": len(rec.get("commands") or []),
+                }
+            )
+
     payload = {
         "entry": {
             "title": entry.title,
@@ -108,6 +120,7 @@ async def async_get_config_entry_diagnostics(
         },
         "online": online,
         "statuses": statuses,
+        "scenes": scenes,
     }
 
     iez_code = str(entry.data.get("iez_code") or "")

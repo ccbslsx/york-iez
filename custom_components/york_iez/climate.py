@@ -25,6 +25,7 @@ from .const import (
     FAN_TO_WIND,
     HVAC_TO_MODE,
     MODE_FLOOR_HEAT,
+    MODE_FLOOR_HEAT_REPORT,
     MODE_TO_HVAC,
     TEMP_MAX,
     TEMP_MIN,
@@ -161,7 +162,7 @@ class YorkIezClimate(ClimateEntity):
         st = self._effective
         if not st or not st.onoff:
             return HVACMode.OFF
-        if st.mode == MODE_FLOOR_HEAT:
+        if st.mode in (MODE_FLOOR_HEAT, MODE_FLOOR_HEAT_REPORT):
             # 地暖在 HA 里也归到 heat，具体是地暖还是热泵由 switch 区分
             return HVACMode.HEAT
         try:
@@ -174,7 +175,11 @@ class YorkIezClimate(ClimateEntity):
         if hvac_mode == HVACMode.OFF:
             await self._send({"onoff": 0})
             return
-        if hvac_mode == HVACMode.HEAT and st and st.mode == MODE_FLOOR_HEAT:
+        if (
+            hvac_mode == HVACMode.HEAT
+            and st
+            and st.mode in (MODE_FLOOR_HEAT, MODE_FLOOR_HEAT_REPORT)
+        ):
             # 已经在烧地暖：只开机，别把它切回热泵制热
             await self._send({"onoff": 1})
             return

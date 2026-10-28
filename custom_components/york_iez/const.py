@@ -23,6 +23,7 @@ PATH_STATUS = "/api/appstatus/homes/{home_id}/status"
 PATH_ONLINE = "/api/appcontrol/cmds/multiOnlineStatus"
 PATH_CONTROL = "/api/appcontrol/cmds/multiIuOuCtrl"
 PATH_SMARTS = "/api/apptimer/homes/{home_id}/smarts"
+PATH_SMART_DETAIL = "/api/apptimer/homes/{home_id}/smarts/{smart_id}"
 PATH_DEVICE_LIST = "/api/apphome/homes/homeList/deviceList"
 PATH_HOME_DETAIL = "/api/apphome/homes/{home_id}"
 PATH_USER_HOMES = "/api/apphome/users/{user_id}/homes"
@@ -41,7 +42,8 @@ MODE_HEAT = 4
 MODE_FAN = 2
 MODE_DRY = 8
 MODE_AUTO = 0
-MODE_FLOOR_HEAT = 16   # 地暖 / 热水
+MODE_FLOOR_HEAT = 16   # 地暖 / 热水（控制下发用这个）
+MODE_FLOOR_HEAT_REPORT = 3  # 状态上报里地暖的编码（下发 16 → 云端回读 3）
 
 # 模式码 → HA hvac_mode 映射
 MODE_TO_HVAC: dict[int, str] = {
@@ -51,6 +53,7 @@ MODE_TO_HVAC: dict[int, str] = {
     MODE_FAN: "fan_only",
     MODE_HEAT: "heat",
     MODE_FLOOR_HEAT: "heat",
+    MODE_FLOOR_HEAT_REPORT: "heat",
 }
 HVAC_TO_MODE: dict[str, int] = {
     "off": None,
@@ -93,6 +96,7 @@ MIN_SCAN_INTERVAL = 15              # 下限：别把约克云打爆
 MAX_SCAN_INTERVAL = 600             # 上限
 ONLINE_SCAN_INTERVAL = 300          # 在线状态轮询（秒）
 COMMAND_DELAY = 1.5                 # 控制后等待（秒），与集成一致
+SCENE_REFRESH_INTERVAL = 3600       # 场景/定时慢刷新（秒）：列表接口一次请求，App 改动 1 小时内同步
 
 # ---------------------------------------------------------------- 字段名（status）
 

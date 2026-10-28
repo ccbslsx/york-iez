@@ -24,7 +24,7 @@ from .entity import async_ensure_gateway_device
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["climate", "sensor", "binary_sensor", "switch"]
+PLATFORMS = ["climate", "sensor", "binary_sensor", "switch", "scene"]
 
 
 def _scan_interval(entry: ConfigEntry) -> int:
@@ -155,6 +155,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, entry.entry_id, coordinator
     )
     await coordinator.async_config_entry_first_refresh()
+    # 场景/定时列表：启动时拉一次（多条明细请求，故不放在轮询里高频打）
+    await coordinator.async_load_scenes()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
         "api": api,
